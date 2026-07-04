@@ -177,11 +177,12 @@ def generar_rinex_sincronizado(raw_path, out_path, obs_dict):
         
     with open(out_path, 'w', encoding='utf-8') as f_out:
         for line in header_lines: f_out.write(line)
-        for tow in sorted(obs_dict.keys()):
+        for tow in sorted(list(obs_dict.keys())):
             meta = obs_dict[tow].get('_meta')
             if not meta: continue
             y, m, d, h, mn, sec = meta
-            sats = [k for k in obs_dict[tow].keys() if k != '_meta']
+            # [BLOQUEO GEOMÉTRICO] Orden estricto para proteger iteración
+            sats = sorted([k for k in obs_dict[tow].keys() if k != '_meta'])
             f_out.write(f"> {y} {m:02d} {d:02d} {h:02d} {mn:02d} {sec:11.7f}  0 {len(sats):2d}\n")
             for sat in sats:
                 c1 = obs_dict[tow][sat].get('C1', 0.0)
@@ -459,8 +460,10 @@ def aislar_diferencias_simples_ppk(obs_b, obs_r):
         if tow not in obs_b: continue
         
         sd_epoca = {'_meta': obs_r[tow]['_meta']}
-        for s, d_r in obs_r[tow].items():
+        # [BLOQUEO GEOMÉTRICO] Orden estricto para proteger iteración matricial
+        for s in sorted(list(obs_r[tow].keys())):
             if s == '_meta' or s not in obs_b[tow]: continue
+            d_r = obs_r[tow][s]
             d_b = obs_b[tow]
             
             freq = 'L1' 
@@ -505,7 +508,8 @@ def calcular_dd_ppk_lambda_epoca(sd_epoca, nav, X_b, Y_b, Z_b, tr, mask_angle):
         if len(sat_positions) < 4: return None, "FAILED"
         
         sat_list_full = list(sat_positions.keys())
-        constellations = set([s[0] for s in sat_list_full])
+        # [BLOQUEO GEOMÉTRICO] Evitar alteración de filas en matriz H por PYTHONHASHSEED
+        constellations = sorted(list(set([s[0] for s in sat_list_full])))
         ref_sats = {}
         sat_list = []
         
@@ -517,6 +521,9 @@ def calcular_dd_ppk_lambda_epoca(sd_epoca, nav, X_b, Y_b, Z_b, tr, mask_angle):
                 sat_list.extend(c_sats)
         
         if len(sat_list) < 3: return None, "FAILED" 
+        
+        # [BLOQUEO GEOMÉTRICO] Invarianza Matricial Estricta
+        sat_list.sort()
         
         def calc_rho(sp, X, Y, Z, lat, lon, alt, el, az):
             dist = math.sqrt((sp[0]-X)**2 + (sp[1]-Y)**2 + (sp[2]-Z)**2)
@@ -534,7 +541,9 @@ def calcular_dd_ppk_lambda_epoca(sd_epoca, nav, X_b, Y_b, Z_b, tr, mask_angle):
             W_diag = [] 
             
             ref_calcs = {}
-            for c, r_sat in ref_sats.items():
+            # [BLOQUEO GEOMÉTRICO] Forzar orden de constelaciones de referencia
+            for c in sorted(list(ref_sats.keys())):
+                r_sat = ref_sats[c]
                 r_data = sat_positions[r_sat]
                 rho_ref_r_base, iono_ref_r, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter, lat_it, lon_it, alt_it, r_data['el'], r_data['az'])
                 el_ref_b, az_ref_b = calcular_topocentricas(r_data['sp'][0], r_data['sp'][1], r_data['sp'][2], X_b, Y_b, Z_b)
@@ -887,7 +896,7 @@ def tab3_calibrar():
             
             coords_raw = []
             for t in t_sample:
-                sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, 10.0) # Máscara basal fija
+                sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, 10.0) 
                 if sem:
                     X_ri, Y_ri, Z_ri = sem
                     la, lo, al = ecef_a_geodesicas(X_ri, Y_ri, Z_ri)
@@ -903,7 +912,6 @@ def tab3_calibrar():
             deltas_h.sort()
             deltas_v.sort()
             
-            # Anclamos el Hard Filter estricto al percentil 10 de élite geométrica verdadera
             idx_optimo = max(1, len(deltas_h) // 10)
             best_eh = max(0.01, float(deltas_h[idx_optimo]))
             best_ev = max(0.01, float(deltas_v[idx_optimo]))
@@ -923,7 +931,6 @@ def tab3_calibrar():
             cp_center, cp_span = 2.0, 1.5
             ca_center, ca_span = 2.0, 1.5
             
-            # 8 niveles de zoom continuo garantizan precisión 100% inamovible (IEEE 754)
             for nivel in range(8):
                 yield f"  [+] Refinando espacio de búsqueda (Zoom {nivel+1}/8)...\n"
                 
@@ -931,17 +938,17 @@ def tab3_calibrar():
                 cp_grid = [cp_center - cp_span, cp_center, cp_center + cp_span]
                 ca_grid = [ca_center - ca_span, ca_center, ca_center + ca_span]
                 
-                # Truncar sobre límites geodésicos lógicos
-                m_grid = [max(5.0, min(15.0, x)) for x in m_grid]
-                cp_grid = [max(0.1, min(5.0, x)) for x in cp_grid]
-                ca_grid = [max(0.1, min(5.0, x)) for x in ca_grid]
+                # [BLOQUEO GEOMÉTRICO] Ordenar el grid para aislar la variable PYTHONHASHSEED de Vercel
+                m_grid_unique = sorted(list(set([max(5.0, min(15.0, x)) for x in m_grid])))
+                cp_grid_unique = sorted(list(set([max(0.1, min(5.0, x)) for x in cp_grid])))
+                ca_grid_unique = sorted(list(set([max(0.1, min(5.0, x)) for x in ca_grid])))
                 
                 nivel_best_rmse = float('inf')
                 nivel_best_m = m_center
                 nivel_best_cp = cp_center
                 nivel_best_ca = ca_center
                 
-                for m in set(m_grid):
+                for m in m_grid_unique:
                     coords = []
                     for t in t_sample:
                         sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, m)
@@ -953,9 +960,8 @@ def tab3_calibrar():
                     
                     if not coords: continue
                     
-                    for cp in set(cp_grid):
-                        for ca in set(ca_grid):
-                            # INYECTAMOS LOS ERRORES EXACTOS CALCULADOS EN LA FASE 1
+                    for cp in cp_grid_unique:
+                        for ca in ca_grid_unique:
                             res = estadistica_desacoplada(coords, cp, ca, best_eh, best_ev)
                             if res[0] is None: continue
                             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res
@@ -975,7 +981,6 @@ def tab3_calibrar():
                                     'dn': nf - utm_n_r, 'de': ef - utm_e_r, 'dz': zf - utm_c_r
                                 }
                 
-                # Preparamos el siguiente Zoom reduciendo el área de búsqueda a la mitad
                 m_center, m_span = nivel_best_m, m_span / 2.0
                 cp_center, cp_span = nivel_best_cp, cp_span / 2.0
                 ca_center, ca_span = nivel_best_ca, ca_span / 2.0
