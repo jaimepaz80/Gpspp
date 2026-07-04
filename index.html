@@ -43,7 +43,6 @@
 
         <section id="tab1" class="tab-content active bg-gray-800 p-6 rounded shadow-lg">
             <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">Archivos de Observación (Descarga vía Google Drive)</h2>
-            <p class="text-sm text-yellow-400 mb-4 font-bold">* Importante: Los enlaces de Google Drive deben tener permiso de "Cualquier persona con el enlace".</p>
             <form id="form-tab1" onsubmit="submitForm(event, '/tab1_homogenizar', 'console1', 2)">
                 <div class="grid grid-cols-2 gap-4 mb-4">
                     <div>
@@ -218,7 +217,7 @@
             const form = e.target;
             const data = new FormData(form);
             const display = document.getElementById(consoleId);
-            display.innerHTML = "> Procesando descarga y computación...\n";
+            display.innerHTML = "> Procesando...\n";
             
             if (consoleId === 'console3') {
                 const btn = document.getElementById('btn-pdf-tab3');
@@ -258,6 +257,7 @@
                         if (consoleId === 'console1') document.getElementById('btn-pdf-tab1').classList.remove('hidden');
                         
                         if (url === '/tab3_calibrar' && fullOutput.includes('[SUCCESS]')) {
+                            
                             document.querySelector('#form-tab4 input[name="utm_norte"]').value = document.querySelector('#form-tab3 input[name="utm_norte"]').value;
                             document.querySelector('#form-tab4 input[name="utm_este"]').value = document.querySelector('#form-tab3 input[name="utm_este"]').value;
                             document.querySelector('#form-tab4 input[name="utm_cota"]').value = document.querySelector('#form-tab3 input[name="utm_cota"]').value;
