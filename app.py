@@ -13,7 +13,6 @@ from flask import Flask, request, send_file, Response, jsonify
 app = Flask(__name__)
 
 # --- RUTA DINÁMICA DE TRABAJO (VERCEL SERVERLESS) ---
-# Se fuerza el uso de /tmp por restricciones de escritura en Vercel.
 BASE_DIR = '/tmp'
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'temp_rinex')
@@ -665,8 +664,13 @@ def estadistica_desacoplada(coordenadas, conf_plani, conf_alti, err_hor_max, err
     E_f = [x for x in E_v if abs(x - E_m) <= conf_plani * E_s] if E_s > 0 else E_v
     Z_f = [x for x in Z_v if abs(x - Z_m) <= conf_alti * Z_s] if Z_s > 0 else Z_v
 
+    # [PARACAÍDAS ESTADÍSTICO] - Evita la división entre cero si los filtros rechazan toda la nube.
+    ret_min = min(len(N_f), len(E_f), len(Z_f))
+    if ret_min == 0:
+        return None, None, None, 0, 0, 0, 0, 0.0
+
     fix_ratio = (len(f_v) / len(valid_coords)) * 100
-    return sum(N_f)/max(1, len(N_f)), sum(E_f)/max(1, len(E_f)), sum(Z_f)/max(1, len(Z_f)), N_s, E_s, Z_s, min(len(N_f), len(E_f), len(Z_f)), fix_ratio
+    return sum(N_f)/ret_min, sum(E_f)/ret_min, sum(Z_f)/ret_min, N_s, E_s, Z_s, ret_min, fix_ratio
 
 # =====================================================================
 # GENERADORES DE INFORMES (FRONTEND)
@@ -885,12 +889,13 @@ def tab3_calibrar():
 
             # =========================================================================
             # FASE 1: CÁLCULO DETERMINISTA DE ERRORES MÁXIMOS (Eh, Ev)
+            # Extracción del Error Verdadero contra las Coordenadas Conocidas
             # =========================================================================
-            yield "[PROGRESO] Fase 1: Extrayendo Errores Máximos Permitidos...\n"
+            yield "[PROGRESO] Fase 1: Extrayendo Errores Máximos Exactos...\n"
             
             coords_raw = []
             for t in t_sample:
-                sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, 10.0) # Máscara basal fija
+                sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, 10.0)
                 if sem:
                     X_ri, Y_ri, Z_ri = sem
                     la, lo, al = ecef_a_geodesicas(X_ri, Y_ri, Z_ri)
@@ -903,16 +908,13 @@ def tab3_calibrar():
             deltas_h = [math.hypot(c[0] - utm_n_r, c[1] - utm_e_r) for c in coords_raw]
             deltas_v = [abs(c[2] - utm_c_r) for c in coords_raw]
             
-            deltas_h.sort()
-            deltas_v.sort()
+            # [CORRECCIÓN]: Calcular Eh y Ev utilizando el Error Cuadrático Medio (RMSE) 
+            # de la nube de puntos cruda, logrando el filtro exacto sin asfixiar la matriz.
+            best_eh = max(0.10, math.sqrt(sum(d**2 for d in deltas_h) / len(deltas_h)))
+            best_ev = max(0.10, math.sqrt(sum(d**2 for d in deltas_v) / len(deltas_v)))
             
-            # Anclamos el Hard Filter estricto al percentil 10 de élite geométrica verdadera
-            idx_optimo = max(1, len(deltas_h) // 10)
-            best_eh = max(0.01, float(deltas_h[idx_optimo]))
-            best_ev = max(0.01, float(deltas_v[idx_optimo]))
-            
-            yield f"  [*] Límite Horizontal Inyectado: {best_eh:.14f} m\n"
-            yield f"  [*] Límite Vertical Inyectado: {best_ev:.14f} m\n\n"
+            yield f"  [*] Límite Horizontal Exacto Calculado: {best_eh:.14f} m\n"
+            yield f"  [*] Límite Vertical Exacto Calculado: {best_ev:.14f} m\n\n"
             
             # =========================================================================
             # FASE 2: MALLA DETERMINISTA DE REFINAMIENTO SUCESIVO (GRID ZOOMING)
@@ -934,10 +936,10 @@ def tab3_calibrar():
                 cp_grid = [cp_center - cp_span, cp_center, cp_center + cp_span]
                 ca_grid = [ca_center - ca_span, ca_center, ca_center + ca_span]
                 
-                # Truncar sobre límites geodésicos lógicos
+                # [CORRECCIÓN]: Truncar manteniendo la realidad de la Campana de Gauss (Mínimo = 1.0 Sigma)
                 m_grid = [max(5.0, min(15.0, x)) for x in m_grid]
-                cp_grid = [max(0.1, min(5.0, x)) for x in cp_grid]
-                ca_grid = [max(0.1, min(5.0, x)) for x in ca_grid]
+                cp_grid = [max(1.0, min(5.0, x)) for x in cp_grid]
+                ca_grid = [max(1.0, min(5.0, x)) for x in ca_grid]
                 
                 nivel_best_rmse = float('inf')
                 nivel_best_m = m_center
@@ -958,7 +960,6 @@ def tab3_calibrar():
                     
                     for cp in set(cp_grid):
                         for ca in set(ca_grid):
-                            # INYECTAMOS LOS ERRORES EXACTOS CALCULADOS EN LA FASE 1
                             res = estadistica_desacoplada(coords, cp, ca, best_eh, best_ev)
                             if res[0] is None: continue
                             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res
