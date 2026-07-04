@@ -12,7 +12,7 @@ from flask import Flask, request, send_file, Response, jsonify
 
 app = Flask(__name__)
 
-# --- RUTA DINÁMICA DE TRABAJO (VERCEL SERVERLESS) ---
+# --- RUTA DINÁMICA DE TRABAJO (VERCEL) ---
 BASE_DIR = '/tmp'
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'temp_rinex')
@@ -30,7 +30,7 @@ OMEGA_E = 7.2921151467e-5
 MU = 3.986005e14
 
 # =====================================================================
-# HERRAMIENTAS GOOGLE DRIVE / DESCARGA (INTEGRACIÓN VERCEL)
+# HERRAMIENTAS GOOGLE DRIVE / DESCARGA
 # =====================================================================
 def extraer_gdrive_id(url):
     match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
@@ -625,7 +625,6 @@ def calcular_dd_ppk_lambda_epoca(sd_epoca, nav, X_b, Y_b, Z_b, tr, mask_angle):
 
 # =====================================================================
 # ESTADÍSTICAS Y FILTRADO VINCULANTE (HARD FILTER)
-# CÓDIGO ORIGINAL INTACTO
 # =====================================================================
 def estadistica_desacoplada(coordenadas, conf_plani, conf_alti, err_hor_max, err_ver_max):
     if not coordenadas: return None, None, None, 0, 0, 0, 0, 0.0
@@ -760,7 +759,7 @@ def generar_informe_ascii(tipo, p_dict):
     return informe
 
 # =====================================================================
-# RUTAS FLASK (FLUJO ARQUITECTÓNICO CORREGIDO)
+# RUTAS FLASK (FLUJO ARQUITECTÓNICO VERCEL)
 # =====================================================================
 @app.route('/')
 def index(): return send_file('index.html')
@@ -774,9 +773,7 @@ def tab1_homogenizar():
     
     url_b = request.form.get('url_base')
     url_r = request.form.get('url_rover')
-
-    if not url_b or not url_r: 
-        return Response("> [ERROR CRÍTICO] Falta URL de Google Drive de Base o Rover.\n", mimetype='text/plain')
+    if not url_b or not url_r: return Response("> [ERROR CRÍTICO] Faltan URLs de Google Drive.\n", mimetype='text/plain')
     
     p_b_raw = os.path.join(UPLOAD_FOLDER, 'base_raw.obs')
     p_r_raw = os.path.join(UPLOAD_FOLDER, 'rover_calibracion_raw.obs')
@@ -809,12 +806,12 @@ def tab1_homogenizar():
             generar_rinex_sincronizado(p_b_raw, p_b_h, base_sinc)
             generar_rinex_sincronizado(p_r_raw, p_r_h, rover_sinc)
             
+            b_name_id = extraer_gdrive_id(url_b) + ".obs"
+            r_name_id = extraer_gdrive_id(url_r) + ".obs"
+            
             guardar_estado('base_raw', p_b_raw)
             guardar_estado('base_calib_homo', p_b_h)
             guardar_estado('rover_calib_homo', p_r_h)
-            
-            b_name_id = extraer_gdrive_id(url_b) + ".obs"
-            r_name_id = extraer_gdrive_id(url_r) + ".obs"
             guardar_estado('name_base_raw', b_name_id)
             guardar_estado('name_rover_calib_raw', r_name_id)
             
@@ -883,15 +880,11 @@ def tab3_calibrar():
             lat_b, lon_b, _ = utm_a_geodesicas(utm_e, utm_n, utm_h, utm_hem)
             X_b, Y_b, Z_b = geodesicas_a_ecef(lat_b, lon_b, utm_c)
 
-            # =========================================================================
-            # FASE 1: CÁLCULO DETERMINISTA DE ERRORES MÁXIMOS (Eh, Ev)
-            # MATEMÁTICA ORIGINAL INTACTA
-            # =========================================================================
             yield "[PROGRESO] Fase 1: Extrayendo Errores Máximos Permitidos...\n"
             
             coords_raw = []
             for t in t_sample:
-                sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, 10.0) # Máscara basal fija
+                sem, status = calcular_dd_ppk_lambda_epoca(sd_suavizada[t], nav, X_b, Y_b, Z_b, t, 10.0)
                 if sem:
                     X_ri, Y_ri, Z_ri = sem
                     la, lo, al = ecef_a_geodesicas(X_ri, Y_ri, Z_ri)
@@ -907,7 +900,6 @@ def tab3_calibrar():
             deltas_h.sort()
             deltas_v.sort()
             
-            # Anclamos el Hard Filter estricto al percentil 10 de élite geométrica verdadera
             idx_optimo = max(1, len(deltas_h) // 10)
             best_eh = max(0.01, float(deltas_h[idx_optimo]))
             best_ev = max(0.01, float(deltas_v[idx_optimo]))
@@ -915,10 +907,6 @@ def tab3_calibrar():
             yield f"  [*] Límite Horizontal Inyectado: {best_eh:.14f} m\n"
             yield f"  [*] Límite Vertical Inyectado: {best_ev:.14f} m\n\n"
             
-            # =========================================================================
-            # FASE 2: MALLA DETERMINISTA DE REFINAMIENTO SUCESIVO (GRID ZOOMING)
-            # MATEMÁTICA ORIGINAL INTACTA
-            # =========================================================================
             yield "[PROGRESO] Fase 2: Malla Determinista para Parámetros (M, Cp, Ca)...\n"
             
             best_rmse = float('inf')
@@ -935,7 +923,6 @@ def tab3_calibrar():
                 cp_grid = [cp_center - cp_span, cp_center, cp_center + cp_span]
                 ca_grid = [ca_center - ca_span, ca_center, ca_center + ca_span]
                 
-                # Truncar sobre límites geodésicos lógicos
                 m_grid = [max(5.0, min(15.0, x)) for x in m_grid]
                 cp_grid = [max(0.1, min(5.0, x)) for x in cp_grid]
                 ca_grid = [max(0.1, min(5.0, x)) for x in ca_grid]
@@ -1019,9 +1006,7 @@ def tab4_procesar():
     err_ver_max = safe_f(request.form.get('err_ver_max'), 0.5)
 
     url_r_nuevo = request.form.get('url_rover_nuevo')
-    
-    if not url_r_nuevo or str(url_r_nuevo).strip() == '': 
-        return Response("> [ERROR] Falta el enlace de Google Drive del nuevo archivo RINEX Rover (Punto Desconocido).\n", mimetype='text/plain')
+    if not url_r_nuevo: return Response("> [ERROR] Falta URL del nuevo archivo RINEX Rover.\n", mimetype='text/plain')
 
     p_r_nuevo = os.path.join(UPLOAD_FOLDER, 'rover_nuevo_raw.obs')
 
