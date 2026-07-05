@@ -63,9 +63,8 @@
         <section id="tab2" class="tab-content bg-gray-800 p-6 rounded shadow-lg">
             <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">Efemérides Transmitidas (Broadcast)</h2>
             <p class="text-sm text-gray-400 mb-4">Descarga automática de IGS/BKG según fecha de la Base.</p>
-            <button onclick="submitTab2()" class="w-full bg-blue-600 hover:bg-blue-500 py-2 rounded font-bold transition">Descargar Efemérides (.nav)</button>
+            <button onclick="submitTab2()" class="w-full bg-blue-600 hover:bg-blue-500 py-2 rounded font-bold transition">Testear Conexión IGS</button>
             <div id="console2" class="console p-4 mt-4 h-48 overflow-y-auto border border-gray-700 rounded"></div>
-            <button id="btn-pdf-tab2" onclick="descargarTextoPDF('console2', 'Informe_Efemerides')" class="hidden mt-4 bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded w-full shadow-lg">Descargar PDF de Efemérides</button>
         </section>
 
         <section id="tab3" class="tab-content bg-gray-800 p-6 rounded shadow-lg">
@@ -216,6 +215,20 @@
             e.preventDefault();
             const form = e.target;
             const data = new FormData(form);
+
+            // [INYECCIÓN STATELESS]: Recuperar URLs de la Pestaña 1 y forzarlas en el payload
+            if (url === '/tab3_calibrar' || url === '/tab4_procesar') {
+                const urlBase = document.querySelector('#form-tab1 input[name="url_base"]').value;
+                if (!urlBase) return alert("Falta el enlace de la Base en la Pestaña 1.");
+                data.append('url_base', urlBase);
+                
+                if (url === '/tab3_calibrar') {
+                    const urlRover = document.querySelector('#form-tab1 input[name="url_rover"]').value;
+                    if (!urlRover) return alert("Falta el enlace del Rover en la Pestaña 1.");
+                    data.append('url_rover', urlRover);
+                }
+            }
+
             const display = document.getElementById(consoleId);
             display.innerHTML = "> Procesando...\n";
             
@@ -306,7 +319,6 @@
                     if (text.includes('[SUCCESS]')) {
                         document.getElementById('btn-tab3').classList.remove('disabled-tab');
                         document.getElementById('btn-tab4').classList.remove('disabled-tab');
-                        document.getElementById('btn-pdf-tab2').classList.remove('hidden');
                     }
                 }
             } catch (err) {
