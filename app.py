@@ -54,10 +54,11 @@ def simular_escritura_disco_js(obs):
         for sat, data_sat in data_t.items():
             if sat == '_meta': continue
             truncado[t][sat] = {}
-            if 'C1' in data_sat and data_sat['C1'] > 0: truncado[t][sat]['C1'] = round(data_sat['C1'], 3)
-            if 'L1' in data_sat and data_sat['L1'] > 0: truncado[t][sat]['L1'] = round(data_sat['L1'], 3)
-            if 'C5' in data_sat and data_sat['C5'] > 0: truncado[t][sat]['C5'] = round(data_sat['C5'], 3)
-            if 'L5' in data_sat and data_sat['L5'] > 0: truncado[t][sat]['L5'] = round(data_sat['L5'], 3)
+            # Clonación estricta del truncamiento JS (toFixed(3))
+            if 'C1' in data_sat and data_sat['C1'] > 0: truncado[t][sat]['C1'] = float(f"{data_sat['C1']:.3f}")
+            if 'L1' in data_sat and data_sat['L1'] > 0: truncado[t][sat]['L1'] = float(f"{data_sat['L1']:.3f}")
+            if 'C5' in data_sat and data_sat['C5'] > 0: truncado[t][sat]['C5'] = float(f"{data_sat['C5']:.3f}")
+            if 'L5' in data_sat and data_sat['L5'] > 0: truncado[t][sat]['L5'] = float(f"{data_sat['L5']:.3f}")
     return truncado
 
 def parse_rinex_obs_completo(path):
@@ -83,7 +84,9 @@ def parse_rinex_obs_completo(path):
             elif line.startswith('>'):
                 p = line[1:].split()
                 if len(p) >= 6:
-                    y, m, d, h, mn, sec = int(p[0]), int(p[1]), int(p[2]), int(p[3]), int(p[4]), float(p[5])
+                    y = int(p[0])
+                    if y < 100: y += 2000  # Corrección Crítica WGS84
+                    m, d, h, mn, sec = int(p[1]), int(p[2]), int(p[3]), int(p[4]), float(p[5])
                     tow = round(gps_time_to_tow(y, m, d, h, mn, sec), 6)
                     obs[tow] = {'_meta': (y, m, d, h, mn, sec)}
             elif tow and len(line) > 3 and line[0] in 'GRECSJ':
@@ -591,6 +594,7 @@ def tab3_calibrar():
                     base_sinc_crudo[tr]['_meta'] = obs_r_raw_crudo[tr]['_meta']
 
             yield "[PROGRESO] Simulando caída geométrica de precisión en RAM...\n"
+            # Clonación rigurosa del filtrado de la aplicación JS original (Corte a 3 decimales)
             sd_suavizada = aislar_diferencias_simples_ppk(simular_escritura_disco_js(base_sinc_crudo), simular_escritura_disco_js(obs_r_raw_crudo))
             if not sd_suavizada: yield "> [ERROR] No hay épocas sincronizadas válidas.\n"; return
 
@@ -694,6 +698,7 @@ def tab4_procesar():
                     base_sinc[tr]['_meta'] = obs_r_raw_crudo[tr]['_meta']
             
             yield "[PROGRESO] Extrayendo Observables DGPS (Datos Crudos sin truncar)...\n"
+            # Tab 4 procesa los crudos directamente sin pasar por simular_escritura_disco_js (Igual a tu Original JS)
             sd_suavizada = aislar_diferencias_simples_ppk(base_sinc, obs_r_raw_crudo)
             if not sd_suavizada: yield "\n> [ERROR] No hay épocas sincronizadas válidas.\n"; return
 
